@@ -73,6 +73,7 @@ class Lemmy extends Plugin
         preg_match('/href="https:\/\/' . $host . '\/c\/(.+?)\/?"/', $article['content'], $matches);
         if (!empty($matches[1])) {
             $article['tags'][] = $matches[1];
+            $article['tags'][] = $matches[1] . '@' . $host;
         }
 
         return $article;
