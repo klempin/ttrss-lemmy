@@ -113,8 +113,17 @@ class Lemmy extends Plugin
                 $inlineHtml .= '<p><img loading="lazy" src="' . htmlspecialchars($uri) . '"></p>';
             }
 
-            if (str_ends_with($uriParts['host'], 'imgur.com') && $extension === 'gifv') {
-                $inlineHtml .= '<p><video preload="metadata" controls="true"><source src="' . htmlspecialchars(str_replace('gifv', 'mp4', $uri)) . '" type="' . static::VIDEO_MIME_TYPES['mp4'] . '"></video></p>';
+            if ($extension === 'gifv') {
+                foreach ([
+                    'imgur.com',
+                    'tumblr.com',
+                ] as $domain) {
+                    if ($uriParts['host'] !== $domain && !str_ends_with($uriParts['host'], '.' . $domain)) {
+                        continue;
+                    }
+
+                    $inlineHtml .= '<p><video preload="metadata" controls="true"><source src="' . htmlspecialchars(str_replace('gifv', 'mp4', $uri)) . '" type="' . static::VIDEO_MIME_TYPES['mp4'] . '"></video></p>';
+                }
             }
         }
 
