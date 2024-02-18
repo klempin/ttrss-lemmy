@@ -20,6 +20,14 @@ class Lemmy extends Plugin
         'sopuli.xyz',
     ];
 
+    private const IMG_FILE_TYPES = [
+        'gif',
+        'jpeg',
+        'jpg',
+        'png',
+        'webp',
+    ];
+
     private const VIDEO_MIME_TYPES = [
         'mov' => 'video/quicktime',
         'mp4' => 'video/mp4',
@@ -90,13 +98,18 @@ class Lemmy extends Plugin
             }
 
             $pathinfo = pathinfo($uriParts['path'] ?? '');
+            $extension = $pathinfo['extension'] ?? null;
 
-            if (array_key_exists($pathinfo['extension'] ?? null, static::VIDEO_MIME_TYPES)) {
-                $inlineHtml .= '<p><video preload="metadata" controls="true"><source src="' . htmlspecialchars($uri) . '" type="' . static::VIDEO_MIME_TYPES[$pathinfo['extension']] . '"></video></p>';
+            if (array_key_exists($extension, static::VIDEO_MIME_TYPES)) {
+                $inlineHtml .= '<p><video preload="metadata" controls="true"><source src="' . htmlspecialchars($uri) . '" type="' . static::VIDEO_MIME_TYPES[$extension] . '"></video></p>';
             }
 
-            if (in_array($pathinfo['extension'] ?? null, ['gif', 'jpeg', 'jpg', 'png', 'webp'], true)) {
+            if (in_array($extension, static::IMG_FILE_TYPES, true)) {
                 $inlineHtml .= '<p><img loading="lazy" src="' . htmlspecialchars($uri) . '"></p>';
+            }
+
+            if (str_ends_with($uriParts['host'], 'imgur.com') && $extension === 'gifv') {
+                $inlineHtml .= '<p><video preload="metadata" controls="true"><source src="' . htmlspecialchars(str_replace('gifv', 'mp4', $uri)) . '" type="' . static::VIDEO_MIME_TYPES['mp4'] . '"></video></p>';
             }
         }
 
