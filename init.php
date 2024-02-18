@@ -8,16 +8,21 @@ class Lemmy extends Plugin
         'derp.foo',
         'discuss.tchncs.de',
         'feddit.de',
+        'feddit.nl',
         'feddit.uk',
         'lemm.ee',
+        'lemmy.blahaj.zone',
+        'lemmy.ca',
         'lemmy.dbzer0.com',
         'lemmy.ml',
         'lemmy.world',
         'lemmy.zip',
         'midwest.social',
         'programming.dev',
+        'reddthat.com',
         'sh.itjust.works',
         'sopuli.xyz',
+        'startrek.website',
     ];
 
     private const IMG_FILE_TYPES = [
