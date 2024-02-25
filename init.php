@@ -4,12 +4,14 @@ class Lemmy extends Plugin
 {
     private const LEMMY_DOMAINS = [
         'ani.social',
+        'aussie.zone',
         'beehaw.org',
         'derp.foo',
         'discuss.tchncs.de',
         'feddit.de',
         'feddit.nl',
         'feddit.uk',
+        'infosec.pub',
         'lemm.ee',
         'lemmy.blahaj.zone',
         'lemmy.ca',
@@ -39,6 +41,8 @@ class Lemmy extends Plugin
         'webm' => 'video/webm',
     ];
 
+    private PluginHost $host;
+
     function about()
     {
         return [null, 'Add content to Lemmy feeds', 'Philip Klempin', false, 'https://github.com/klempin/ttrss-lemmy'];
@@ -51,7 +55,10 @@ class Lemmy extends Plugin
 
     function init($host)
     {
-        $host->add_hook($host::HOOK_ARTICLE_FILTER, $this);
+        $this->host = $host;
+        $this->host->add_hook($host::HOOK_ARTICLE_FILTER, $this);
+        $this->host->add_hook($host::HOOK_FEED_FETCHED, $this);
+        $this->host->add_hook($host::HOOK_PREFS_TAB, $this);
     }
 
     function hook_article_filter($article)
@@ -68,9 +75,15 @@ class Lemmy extends Plugin
             }
 
             $host = parse_url($uri, PHP_URL_HOST);
-            if (in_array($host, static::LEMMY_DOMAINS, true)) {
-                $article = static::addTags($article, $host);
-                $article = static::inlineMedia($article);
+            if (!in_array($host, static::LEMMY_DOMAINS, true)) {
+                break;
+            }
+
+            $article['tags'][] = $host;
+            preg_match('/href="https:\/\/' . $host . '\/c\/(.+?)\/?"/', $article['content'], $matches);
+            if (!empty($matches[1])) {
+                $article['tags'][] = $matches[1];
+                $article['tags'][] = $matches[1] . '@' . $host;
             }
 
             break;
@@ -79,22 +92,90 @@ class Lemmy extends Plugin
         return $article;
     }
 
-    private static function addTags(array $article, string $host): array
+    function hook_feed_fetched($feed_data, $fetch_url, $owner_uid, $feed)
     {
-        $article['tags'][] = $host;
-
-        preg_match('/href="https:\/\/' . $host . '\/c\/(.+?)\/?"/', $article['content'], $matches);
-        if (!empty($matches[1])) {
-            $article['tags'][] = $matches[1];
-            $article['tags'][] = $matches[1] . '@' . $host;
+        $host = parse_url($fetch_url, PHP_URL_HOST);
+        if (!in_array($host, static::LEMMY_DOMAINS, true)) {
+            return $feed_data;
         }
 
-        return $article;
+        $feed = new DOMDocument();
+        if (!$feed->loadXML($feed_data)) {
+            return $feed_data;
+        }
+
+        $linkToComments = $this->host->get($this, 'link_to_comments');
+        foreach ($feed->getElementsByTagName('item') as $feedItem) {
+            $itemContent = $feedItem->getElementsByTagName('description')->item(0);
+            if (empty($itemContent) || empty($itemContent->nodeValue)) {
+                continue;
+            }
+
+            $itemContent->nodeValue = static::inlineMedia($itemContent->nodeValue);
+
+            $itemLink = $feedItem->getElementsByTagName('link')->item(0);
+            if (empty($itemLink)) {
+                continue;
+            }
+
+            if ($linkToComments) {
+                preg_match('/href="(https:\/\/' . $host . '\/post\/\d+?\/?)".+?comments?<\/a>/', $itemContent->nodeValue, $matches);
+                if (!empty($matches[1])) {
+                    $itemLink->nodeValue = $matches[1];
+                }
+            }
+        }
+
+        return $feed->saveXML();
     }
 
-    private static function inlineMedia(array $article): array
+    function hook_prefs_tab($args)
     {
-        preg_match_all('/href="(.+?)"/', $article['content'], $matches);
+        if ($args !== 'prefFeeds') {
+            return;
+        }
+
+        $title = __('Lemmy');
+        $pluginHandlerTags = \Controls\pluginhandler_tags($this, 'save_settings');
+        $linkToCommentsCheckbox = \Controls\checkbox_tag('lemmy_link_to_comments', $this->host->get($this, 'link_to_comments') === true, id: 'lemmy_link_to_comments');
+        $enableGlobally = __('Link article to Lemmy comments');
+        $submitTag = \Controls\submit_tag(__('Save settings'));
+
+        echo <<<EOT
+<div dojoType="dijit.layout.AccordionPane" title="<i class='material-icons'>image</i> {$title}">
+    <form dojoType='dijit.form.Form'>
+        {$pluginHandlerTags}
+        <script type="dojo/method" event="onSubmit" args="evt">
+            evt.preventDefault();
+            if (this.validate()) {
+                Notify.progress('Saving data...', true);
+                xhr.post("backend.php", this.getValues(), (reply) => {
+                    Notify.info(reply);
+                })
+            }
+        </script>
+
+        <fieldset>
+            <label for="lemmy_link_to_comments" class="checkbox">{$linkToCommentsCheckbox} {$enableGlobally}</label>
+        </fieldset>
+
+        <fieldset>
+            {$submitTag}
+        </fieldset>
+    </form>
+</div>
+EOT;
+    }
+
+    public function save_settings()
+    {
+        $this->host->set($this, 'link_to_comments', ($_POST["lemmy_link_to_comments"] ?? "") === "on");
+        echo __("Lemmy: Settings saved");
+    }
+
+    private static function inlineMedia(string $content): string
+    {
+        preg_match_all('/href="(.+?)"/', $content, $matches);
         $inlineHtml = '';
         foreach ($matches[1] ?? [] as $uri) {
             $uriParts = parse_url($uri);
@@ -127,8 +208,6 @@ class Lemmy extends Plugin
             }
         }
 
-        $article['content'] = $inlineHtml . $article['content'];
-
-        return $article;
+        return $inlineHtml . $content;
     }
 }
