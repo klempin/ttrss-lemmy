@@ -56,7 +56,7 @@ class Lemmy extends Plugin
     function init($host)
     {
         $this->host = $host;
-        $this->host->add_hook($host::HOOK_ARTICLE_FILTER, $this);
+        $this->host->add_hook($host::HOOK_ARTICLE_FILTER, $this, 49);
         $this->host->add_hook($host::HOOK_FEED_FETCHED, $this);
         $this->host->add_hook($host::HOOK_PREFS_TAB, $this);
     }
@@ -79,7 +79,9 @@ class Lemmy extends Plugin
                 break;
             }
 
+            $article['content'] = static::inlineMedia($article['content']);
             $article['tags'][] = $host;
+
             preg_match('/href="https:\/\/' . $host . '\/c\/(.+?)\/?"/', $article['content'], $matches);
             if (!empty($matches[1])) {
                 $article['tags'][] = $matches[1];
@@ -99,34 +101,33 @@ class Lemmy extends Plugin
             return $feed_data;
         }
 
+        if (!$this->host->get($this, 'link_to_comments')) {
+            return $feed_data;
+        }
+
         $feed = new DOMDocument();
         if (!$feed->loadXML($feed_data)) {
             return $feed_data;
         }
 
-        $linkToComments = $this->host->get($this, 'link_to_comments');
         foreach ($feed->getElementsByTagName('item') as $feedItem) {
             $itemContent = $feedItem->getElementsByTagName('description')->item(0);
             if (empty($itemContent) || empty($itemContent->nodeValue)) {
                 continue;
             }
 
-            $itemContent->nodeValue = static::inlineMedia($itemContent->nodeValue);
-
             $itemLink = $feedItem->getElementsByTagName('link')->item(0);
             if (empty($itemLink)) {
                 continue;
             }
 
-            if ($linkToComments) {
-                preg_match('/href="(https:\/\/' . $host . '\/post\/\d+?\/?)".+?comments?<\/a>/', $itemContent->nodeValue, $matches);
-                if (!empty($matches[1])) {
-                    $itemLink->nodeValue = $matches[1];
-                }
+            preg_match('/href="(https:\/\/' . $host . '\/post\/\d+?\/?)".+?comments?<\/a>/', $itemContent->nodeValue, $matches);
+            if (!empty($matches[1])) {
+                $itemLink->nodeValue = $matches[1];
             }
         }
 
-        return $feed->saveXML();
+        return $feed->saveXML() ?: $feed_data;
     }
 
     function hook_prefs_tab($args)
