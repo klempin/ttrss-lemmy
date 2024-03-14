@@ -58,6 +58,7 @@ class Lemmy extends Plugin
         $this->host = $host;
         $this->host->add_hook($host::HOOK_ARTICLE_FILTER, $this, 49);
         $this->host->add_hook($host::HOOK_FEED_FETCHED, $this);
+        $this->host->add_hook($host::HOOK_IFRAME_WHITELISTED, $this);
         $this->host->add_hook($host::HOOK_PREFS_TAB, $this);
     }
 
@@ -79,7 +80,13 @@ class Lemmy extends Plugin
                 break;
             }
 
-            $article['content'] = static::inlineMedia($article['content']);
+            preg_match_all('/href="(.+?)"/', $article['content'], $matches);
+            $inlineHtml = '';
+            foreach ($matches[1] ?? [] as $uri) {
+                $inlineHtml .= static::inlineMedia($uri);
+            }
+
+            $article['content'] = $inlineHtml . $article['content'];
             $article['tags'][] = $host;
 
             preg_match('/href="https:\/\/' . $host . '\/c\/(.+?)\/?"/', $article['content'], $matches);
@@ -130,6 +137,11 @@ class Lemmy extends Plugin
         return $feed->saveXML() ?: $feed_data;
     }
 
+    function hook_iframe_whitelisted($url)
+    {
+        return $url === 'www.youtube-nocookie.com';
+    }
+
     function hook_prefs_tab($args)
     {
         if ($args !== 'prefFeeds') {
@@ -174,41 +186,54 @@ EOT;
         echo __("Lemmy: Settings saved");
     }
 
-    private static function inlineMedia(string $content): string
+    private static function inlineMedia(string $uri): string
     {
-        preg_match_all('/href="(.+?)"/', $content, $matches);
-        $inlineHtml = '';
-        foreach ($matches[1] ?? [] as $uri) {
-            $uriParts = parse_url($uri);
-            if ($uriParts === false) {
-                continue;
+        $uriParts = parse_url($uri);
+        if ($uriParts === false || empty($uriParts['host'])) {
+            return '';
+        }
+
+        if ($uriParts['host'] === 'youtu.be') {
+            return '<iframe src="https://www.youtube-nocookie.com/embed/' . htmlspecialchars($uriParts['path']) . '" allow="clipboard-write; encrypted-media; picture-in-picture; web-share" allowfullscreen></iframe>';
+        }
+
+        if ($uriParts['host'] === 'www.youtube.com') {
+            if (empty($uriParts['query'])) {
+                return '';
             }
 
-            $pathinfo = pathinfo($uriParts['path'] ?? '');
-            $extension = $pathinfo['extension'] ?? null;
-
-            if (array_key_exists($extension, static::VIDEO_MIME_TYPES)) {
-                $inlineHtml .= '<p><video preload="metadata" controls="true"><source src="' . htmlspecialchars($uri) . '" type="' . static::VIDEO_MIME_TYPES[$extension] . '"></video></p>';
+            parse_str($uriParts['query'], $query);
+            if (empty($query['v'])) {
+                return '';
             }
 
-            if (in_array($extension, static::IMG_FILE_TYPES, true)) {
-                $inlineHtml .= '<p><img loading="lazy" src="' . htmlspecialchars($uri) . '"></p>';
-            }
+            return '<iframe src="https://www.youtube-nocookie.com/embed/' . htmlspecialchars($query['v']) . '" allow="clipboard-write; encrypted-media; picture-in-picture; web-share" allowfullscreen></iframe>';
+        }
 
-            if ($extension === 'gifv') {
-                foreach ([
-                    'imgur.com',
-                    'tumblr.com',
-                ] as $domain) {
-                    if ($uriParts['host'] !== $domain && !str_ends_with($uriParts['host'], '.' . $domain)) {
-                        continue;
-                    }
+        $pathinfo = pathinfo($uriParts['path'] ?? '');
+        $extension = $pathinfo['extension'] ?? null;
 
-                    $inlineHtml .= '<p><video preload="metadata" controls="true"><source src="' . htmlspecialchars(str_replace('gifv', 'mp4', $uri)) . '" type="' . static::VIDEO_MIME_TYPES['mp4'] . '"></video></p>';
+        if (array_key_exists($extension, static::VIDEO_MIME_TYPES)) {
+            return '<p><video preload="metadata" controls="true"><source src="' . htmlspecialchars($uri) . '" type="' . static::VIDEO_MIME_TYPES[$extension] . '"></video></p>';
+        }
+
+        if (in_array($extension, static::IMG_FILE_TYPES, true)) {
+            return '<p><img loading="lazy" src="' . htmlspecialchars($uri) . '"></p>';
+        }
+
+        if ($extension === 'gifv') {
+            foreach ([
+                'imgur.com',
+                'tumblr.com',
+            ] as $domain) {
+                if ($uriParts['host'] !== $domain && !str_ends_with($uriParts['host'], '.' . $domain)) {
+                    return '';
                 }
+
+                return '<p><video preload="metadata" controls="true"><source src="' . htmlspecialchars(str_replace('gifv', 'mp4', $uri)) . '" type="' . static::VIDEO_MIME_TYPES['mp4'] . '"></video></p>';
             }
         }
 
-        return $inlineHtml . $content;
+        return '';
     }
 }
